@@ -144,6 +144,11 @@ export default function Home(): ReactElement {
     }
   };
 
+  // Undo the last annotation action
+  const handleUndo = () => {
+    setAnnotations((prev) => prev.slice(0, -1));
+  };
+
   // Tool selection handler
   const handleToolSelect = (tool: Tool) => {
     setActiveTool(tool);
@@ -297,6 +302,13 @@ export default function Home(): ReactElement {
               onChange={handleColorChange}
               className="w-10 h-10 border border-gray-300 rounded"
             />
+            <button
+              onClick={handleUndo}
+              className="px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow bg-yellow-500 text-white hover:bg-yellow-600 transition-colors"
+              disabled={annotations.length === 0}
+            >
+              Undo
+            </button>
             <button
               onClick={exportPDF}
               className="px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow bg-green-500 text-white hover:bg-green-600 transition-colors"

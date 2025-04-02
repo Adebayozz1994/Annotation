@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef, ReactElement, MouseEvent } from "react";
-import { useDropzone, FileRejection } from "react-dropzone";
+import React, { useState, useRef, useEffect, ReactElement, MouseEvent } from "react";
+import { useDropzone } from "react-dropzone";
 import { Document, Page, pdfjs } from "react-pdf";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
@@ -31,14 +31,11 @@ interface Annotation {
 
 // Helper function to convert an Oklab color string to an RGB string
 const oklabToRgb = (oklabStr: string): string | null => {
-  // Match oklab(…) pattern (supports both space and comma delimiters)
   const match = oklabStr.match(/oklab\(([^)]+)\)/i);
   if (!match) return null;
-  // Split by commas or spaces
   const values = match[1].trim().split(/[\s,]+/).map(Number);
   if (values.length < 3) return null;
   const [L, a, b] = values;
-  // Convert Oklab to linear sRGB
   const l = L + 0.3963377774 * a + 0.2158037573 * b;
   const m = L - 0.1055613458 * a - 0.0638541728 * b;
   const s = L - 0.0894841775 * a - 1.2914855480 * b;
@@ -48,11 +45,9 @@ const oklabToRgb = (oklabStr: string): string | null => {
   let R = 4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
   let G = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
   let B = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3;
-  // Clamp values between 0 and 1
   R = Math.min(Math.max(R, 0), 1);
   G = Math.min(Math.max(G, 0), 1);
   B = Math.min(Math.max(B, 0), 1);
-  // Convert to 0-255 scale
   R = Math.round(R * 255);
   G = Math.round(G * 255);
   B = Math.round(B * 255);
@@ -63,6 +58,7 @@ export default function Home(): ReactElement {
   const [pdfFile, setPdfFile] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const pdfContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
 
   // Annotation state
   const [activeTool, setActiveTool] = useState<Tool>(null);
@@ -73,8 +69,20 @@ export default function Home(): ReactElement {
   const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
   const [signaturePath, setSignaturePath] = useState<{ x: number; y: number }[]>([]);
 
+  // Update container width on mount and resize
+  useEffect(() => {
+    const updateWidth = () => {
+      if (pdfContainerRef.current) {
+        setContainerWidth(pdfContainerRef.current.offsetWidth);
+      }
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
+
   // Dropzone for PDF file upload
-  const onDrop = (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+  const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0];
       const reader = new FileReader();
@@ -105,19 +113,15 @@ export default function Home(): ReactElement {
           useCORS: true,
           backgroundColor: "#ffffff",
           onclone: (clonedDoc) => {
-            // Traverse all elements in the cloned document and convert Oklab colors to RGB
             clonedDoc.querySelectorAll("*").forEach((node) => {
               const element = node as HTMLElement;
               const computedStyle = window.getComputedStyle(element);
-              
-              // Process 'color' property if it contains "oklab"
               if (computedStyle.color.includes("oklab")) {
                 const rgbColor = oklabToRgb(computedStyle.color);
                 if (rgbColor) {
                   element.style.color = rgbColor;
                 }
               }
-              // Process 'background-color' property if it contains "oklab"
               if (computedStyle.backgroundColor.includes("oklab")) {
                 const rgbBg = oklabToRgb(computedStyle.backgroundColor);
                 if (rgbBg) {
@@ -142,7 +146,6 @@ export default function Home(): ReactElement {
 
   // Tool selection handler
   const handleToolSelect = (tool: Tool) => {
-    console.log("Tool selected:", tool);
     setActiveTool(tool);
   };
 
@@ -175,6 +178,7 @@ export default function Home(): ReactElement {
   };
 
   const handleMouseUp = (e: MouseEvent<HTMLDivElement>) => {
+    void e;
     if (!isDrawing || !activeTool) return;
     setIsDrawing(false);
     if (activeTool === "signature") {
@@ -194,7 +198,6 @@ export default function Home(): ReactElement {
       ]);
       setSignaturePath([]);
     } else if (startPos && currentPos) {
-      // Ensure a minimal dragged area for visibility
       if (
         Math.abs(currentPos.x - startPos.x) < 5 ||
         Math.abs(currentPos.y - startPos.y) < 5
@@ -213,20 +216,10 @@ export default function Home(): ReactElement {
         if (commentText) {
           setAnnotations((prev) => [
             ...prev,
-            {
-              id,
-              type: activeTool,
-              x,
-              y,
-              width,
-              height,
-              color: annotationColor,
-              text: commentText,
-            },
+            { id, type: activeTool, x, y, width, height, color: annotationColor, text: commentText },
           ]);
         }
       } else {
-        // For highlight and underline
         setAnnotations((prev) => [
           ...prev,
           { id, type: activeTool, x, y, width, height, color: annotationColor },
@@ -238,7 +231,7 @@ export default function Home(): ReactElement {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-5">
+    <div className="p-5">
       <h1 className="text-3xl font-bold text-center mb-5">PDF Annotation App</h1>
       {!pdfFile ? (
         <div
@@ -257,10 +250,10 @@ export default function Home(): ReactElement {
       ) : (
         <div>
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center space-x-2 mb-4 relative z-10">
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
             <button
               onClick={() => handleToolSelect("highlight")}
-              className={`px-4 py-2 rounded shadow transition-colors ${
+              className={`px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow transition-colors ${
                 activeTool === "highlight"
                   ? "bg-blue-600 text-white"
                   : "bg-blue-500 text-white hover:bg-blue-600"
@@ -270,7 +263,7 @@ export default function Home(): ReactElement {
             </button>
             <button
               onClick={() => handleToolSelect("underline")}
-              className={`px-4 py-2 rounded shadow transition-colors ${
+              className={`px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow transition-colors ${
                 activeTool === "underline"
                   ? "bg-blue-600 text-white"
                   : "bg-blue-500 text-white hover:bg-blue-600"
@@ -280,7 +273,7 @@ export default function Home(): ReactElement {
             </button>
             <button
               onClick={() => handleToolSelect("comment")}
-              className={`px-4 py-2 rounded shadow transition-colors ${
+              className={`px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow transition-colors ${
                 activeTool === "comment"
                   ? "bg-blue-600 text-white"
                   : "bg-blue-500 text-white hover:bg-blue-600"
@@ -290,7 +283,7 @@ export default function Home(): ReactElement {
             </button>
             <button
               onClick={() => handleToolSelect("signature")}
-              className={`px-4 py-2 rounded shadow transition-colors ${
+              className={`px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow transition-colors ${
                 activeTool === "signature"
                   ? "bg-blue-600 text-white"
                   : "bg-blue-500 text-white hover:bg-blue-600"
@@ -302,47 +295,42 @@ export default function Home(): ReactElement {
               type="color"
               value={annotationColor}
               onChange={handleColorChange}
-              className="w-10 h-10 ml-2 border border-gray-300 rounded"
+              className="w-10 h-10 border border-gray-300 rounded"
             />
             <button
               onClick={exportPDF}
-              className="px-4 py-2 rounded shadow bg-green-500 text-white hover:bg-green-600 transition-colors ml-2"
+              className="px-3 py-2 md:px-4 md:py-2 text-sm md:text-base rounded shadow bg-green-500 text-white hover:bg-green-600 transition-colors"
             >
               Export PDF
             </button>
           </div>
           {/* PDF container */}
-          <div ref={pdfContainerRef} className="relative border border-gray-300 rounded">
+          <div ref={pdfContainerRef} className="relative border border-gray-300 rounded mx-auto">
             <Document file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}>
               {numPages &&
-                Array.from(new Array(numPages), (el, index) => (
-                  <Page key={`page_${index + 1}`} pageNumber={index + 1} />
+                Array.from(new Array(numPages), (_, index) => (
+                  <Page key={`page_${index + 1}`} pageNumber={index + 1} width={containerWidth} />
                 ))}
             </Document>
             {/* Annotation overlay */}
             <div
-              className="absolute inset-0 z-5"
+              className="absolute inset-0 z-10"
               style={{ pointerEvents: activeTool ? "auto" : "none" }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
             >
-              {/* Temporary drawing rectangle for non-signature tools */}
-              {isDrawing &&
-                activeTool !== "signature" &&
-                startPos &&
-                currentPos && (
-                  <div
-                    className="absolute border-2 border-dashed border-red-500 bg-red-200/50"
-                    style={{
-                      left: Math.min(startPos.x, currentPos.x),
-                      top: Math.min(startPos.y, currentPos.y),
-                      width: Math.abs(currentPos.x - startPos.x),
-                      height: Math.abs(currentPos.y - startPos.y),
-                    }}
-                  />
-                )}
-              {/* Render saved annotations */}
+              {isDrawing && activeTool !== "signature" && startPos && currentPos && (
+                <div
+                  className="absolute border-2 border-dashed border-red-500 bg-red-200/50"
+                  style={{
+                    left: Math.min(startPos.x, currentPos.x),
+                    top: Math.min(startPos.y, currentPos.y),
+                    width: Math.abs(currentPos.x - startPos.x),
+                    height: Math.abs(currentPos.y - startPos.y),
+                  }}
+                />
+              )}
               {annotations.map((ann) => {
                 if (ann.type === "highlight" || ann.type === "underline") {
                   return (
@@ -354,10 +342,8 @@ export default function Home(): ReactElement {
                         top: ann.y,
                         width: ann.width,
                         height: ann.height,
-                        backgroundColor:
-                          ann.type === "highlight" ? ann.color + "55" : undefined,
-                        borderBottom:
-                          ann.type === "underline" ? `4px solid ${ann.color}` : undefined,
+                        backgroundColor: ann.type === "highlight" ? ann.color + "55" : undefined,
+                        borderBottom: ann.type === "underline" ? `4px solid ${ann.color}` : undefined,
                       }}
                     />
                   );
@@ -380,14 +366,8 @@ export default function Home(): ReactElement {
                   return (
                     <svg
                       key={ann.id}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        height: "100%",
-                        pointerEvents: "none",
-                      }}
+                      className="absolute pointer-events-none"
+                      style={{ top: 0, left: 0, width: "100%", height: "100%" }}
                     >
                       <polyline
                         points={ann.path.map((p) => `${p.x},${p.y}`).join(" ")}

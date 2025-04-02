@@ -25,9 +25,39 @@ interface Annotation {
   width: number;
   height: number;
   color: string;
-  text?: string; // For comment annotations
-  path?: { x: number; y: number }[]; // For freehand signature drawing
+  text?: string;
+  path?: { x: number; y: number }[];
 }
+
+// Helper function to convert an Oklab color string to an RGB string
+const oklabToRgb = (oklabStr: string): string | null => {
+  // Match oklab(…) pattern (supports both space and comma delimiters)
+  const match = oklabStr.match(/oklab\(([^)]+)\)/i);
+  if (!match) return null;
+  // Split by commas or spaces
+  const values = match[1].trim().split(/[\s,]+/).map(Number);
+  if (values.length < 3) return null;
+  const [L, a, b] = values;
+  // Convert Oklab to linear sRGB
+  const l = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l3 = l * l * l;
+  const m3 = m * m * m;
+  const s3 = s * s * s;
+  let R = 4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
+  let G = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
+  let B = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3;
+  // Clamp values between 0 and 1
+  R = Math.min(Math.max(R, 0), 1);
+  G = Math.min(Math.max(G, 0), 1);
+  B = Math.min(Math.max(B, 0), 1);
+  // Convert to 0-255 scale
+  R = Math.round(R * 255);
+  G = Math.round(G * 255);
+  B = Math.round(B * 255);
+  return `rgb(${R}, ${G}, ${B})`;
+};
 
 export default function Home(): ReactElement {
   const [pdfFile, setPdfFile] = useState<string | null>(null);
@@ -36,7 +66,7 @@ export default function Home(): ReactElement {
 
   // Annotation state
   const [activeTool, setActiveTool] = useState<Tool>(null);
-  const [annotationColor, setAnnotationColor] = useState<string>("#ffff00"); // default yellow
+  const [annotationColor, setAnnotationColor] = useState<string>("#ffff00");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -69,14 +99,44 @@ export default function Home(): ReactElement {
   // Export annotated view as PDF
   const exportPDF = async (): Promise<void> => {
     if (pdfContainerRef.current) {
-      const canvas = await html2canvas(pdfContainerRef.current, { scale: 2 });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "pt", "a4");
-      const imgProps = pdf.getImageProperties(imgData);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-      pdf.save("annotated.pdf");
+      try {
+        const canvas = await html2canvas(pdfContainerRef.current, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          onclone: (clonedDoc) => {
+            // Traverse all elements in the cloned document and convert Oklab colors to RGB
+            clonedDoc.querySelectorAll("*").forEach((node) => {
+              const element = node as HTMLElement;
+              const computedStyle = window.getComputedStyle(element);
+              
+              // Process 'color' property if it contains "oklab"
+              if (computedStyle.color.includes("oklab")) {
+                const rgbColor = oklabToRgb(computedStyle.color);
+                if (rgbColor) {
+                  element.style.color = rgbColor;
+                }
+              }
+              // Process 'background-color' property if it contains "oklab"
+              if (computedStyle.backgroundColor.includes("oklab")) {
+                const rgbBg = oklabToRgb(computedStyle.backgroundColor);
+                if (rgbBg) {
+                  element.style.backgroundColor = rgbBg;
+                }
+              }
+            });
+          },
+        });
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF("p", "pt", "a4");
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+        pdf.save("annotated.pdf");
+      } catch (error) {
+        console.error("Error exporting PDF:", error);
+      }
     }
   };
 
@@ -317,27 +377,27 @@ export default function Home(): ReactElement {
                     </div>
                   );
                 } else if (ann.type === "signature" && ann.path) {
-                    return (
-                      <svg
-                        key={ann.id}
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          height: "100%",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        <polyline
-                          points={ann.path.map((p) => `${p.x},${p.y}`).join(" ")}
-                          stroke={ann.color}
-                          strokeWidth="2"
-                          fill="none"
-                        />
-                      </svg>
-                    );
-                  }
+                  return (
+                    <svg
+                      key={ann.id}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <polyline
+                        points={ann.path.map((p) => `${p.x},${p.y}`).join(" ")}
+                        stroke={ann.color}
+                        strokeWidth="2"
+                        fill="none"
+                      />
+                    </svg>
+                  );
+                }
                 return null;
               })}
             </div>
